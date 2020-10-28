@@ -1,12 +1,28 @@
-from flask import Flask,request,jsonify,g
+from flask import Flask,request,jsonify,g,render_template
 from werkzeug.security import generate_password_hash , check_password_hash
-import os
-from access_file import open_file,update_file
+from flask_mail import Mail, Message
+from datetime import datetime
+import pytz
 import random
 import string
 import sqlite3
 app=Flask(__name__)
 app.config["DEBUG"]=True
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USERNAME'] = 'croppredictor@gmail.com'
+app.config['MAIL_PASSWORD'] = 'crop6789'
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USE_SSL'] = False
+app.config['MAIL_DEFAULT_SENDER'] = ('Admin','croppredictor@gmail.com')
+mail = Mail()
+mail.init_app(app)
+def get_cur_time():
+    tz_Kol = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(tz_Kol)
+    date=now.strftime("%d/%m/%Y")
+    time = now.strftime("%H:%M:%S")
+    return (date,time)
 def connect_db():
     sql = sqlite3.connect(r'pro.db')
     sql.row_factory = sqlite3.Row
@@ -67,13 +83,15 @@ def register():
     print("password = {}".format(en_password))
 
     #GENERATING FARMER ID
-    number=open_file()
+    db=get_db()
+    cur=db.execute("SELECT num FROM FARMER_ID_COUNT")
+    number=cur.fetchone()
     r = ''.join([random.choice(string.ascii_uppercase) for n in range(10)])
-    farmer_id= r+"_"+str(number)
-    update_file()
+    farmer_id= r+"_"+str(number["num"])
+    db.execute("UPDATE FARMER_ID_COUNT SET num=num+1")
+    db.commit()
 
     print(farmer_id)
-    db=get_db()
     cur = db.execute("select district_id from district where district_name = ?",(district,))
     d_id = cur.fetchone()
     cur = db.execute("select area_id from area where area_name = ? and district_id = ?",(area,d_id['district_id'],))
@@ -89,6 +107,13 @@ def register():
     '''
 
     #if no errors , result = success is returned
+    emsg = Message(
+    'Account Creation At Agro Farmer Solutions',
+    sender =  ('Admin','croppredictor@gmail.com'),
+    recipients=[email]
+    )
+    emsg.html = render_template("reg_mail.html",Farmer_name=username,Farmer_ID=farmer_id,Password=password)
+    mail.send(emsg)
     msg={"result":"successs"}
     return jsonify(msg)
 
@@ -135,6 +160,18 @@ def login():
 
     '''
     if check_password_hash(pwd["password"],password) :
+        db=get_db()
+        cur = db.execute("select email from farm_em where farmer_id = ?",(username,))
+        eml = cur.fetchone()
+        cur = db.execute("select farmer_name from farmer_details where farmer_id = ?",(username,))
+        fm_name = cur.fetchone()
+        emsg = Message(
+        'Login Activity Record - Agro Farmer Solutions (Crop Predictor)',
+        recipients=[eml[0]]
+        )
+        dt=get_cur_time()
+        emsg.html =  render_template("login_mail.html",farmer_ID=username,Date=dt[0],time=dt[1])
+        mail.send(emsg)
         return jsonify({"result":"logged in"})
     else:
         return jsonify({"result":"wrong password"})
